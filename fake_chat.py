@@ -9,15 +9,19 @@ from itertools import cycle
 from random import randint
 from time import time, sleep
 
+#can't rely on curses to find tab, enter, etc.
 KEY_TAB = 9
 
 
-TITLE_ACTIVE = 2
-TITLE_INACTIVE = 3
-MENU_MESSAGE = 4
-BASIC = 0
+#name some colors (foreground/background pairs)
+#actually defined later through curses.init_pair
+BASIC = 0  #not editable
+TITLE_ACTIVE = 1
+TITLE_INACTIVE = 2
+MENU_MESSAGE = 3
 
 class FakeChatWindow(StringWindow):
+    '''String Window that just spews out some words at random times'''
 
     def __init__(self,*args,**kwargs):
 
@@ -60,29 +64,38 @@ def run():
     splitx = int(maxx*.8)
 
     #initialize windows
+    #specify Upper left corner, size, title, color scheme and border/no-border
     main_border = Window((0,0),(maxx, maxy),"Main Window",TITLE_INACTIVE)
     display_output = FakeChatWindow((1,1),(splitx-1,splity-1),"Chat",TITLE_INACTIVE)
     menu_window = MenuWindow((splitx,1),((maxx-splitx-1),maxy-2),"Menu",TITLE_INACTIVE)
     editor_window = EditorWindow((1,splity),(splitx-1,maxy-splity-1), "Text Edit", palette=TITLE_INACTIVE,
                              callback=display_output.add_str)
 
+    #Set menu options with corrisponding callbacks
     menu_actions = [MenuTuple("Say 'Hi'",(display_output.add_str,"Hello from the Menu",MENU_MESSAGE)),
                     MenuTuple("Say something else",(display_output.add_str,"From the Menu, Hello!",MENU_MESSAGE)),
                     MenuTuple("I Prefer Cyan",(curses.init_pair,TITLE_INACTIVE,COLOR_CYAN,COLOR_BLACK)),
                     MenuTuple("I Prefer Green",(curses.init_pair,TITLE_INACTIVE,COLOR_GREEN,COLOR_BLACK)),
                     MenuTuple("I Prefer Plain",(curses.init_pair,TITLE_INACTIVE,COLOR_WHITE,COLOR_BLACK)),
                     ]
- 
     menu_window.set_menu(menu_actions)
 
+    #Put all the windows in a list so they can be updated together
     windows = [main_border, display_output, menu_window, editor_window]
+
+    #create input window cycling
+    # an input window must have a process_key(key) method
     input_windows = cycle([menu_window,editor_window])
     active_window = input_windows.next()
     active_window.draw_border(TITLE_ACTIVE)
 
+
+    #Main Program loop.  CTRL+C to break it.
     while True:
+      #asynchronously try to get the key the user pressed
       key = stdscr.getch()
       if key == curses.ERR:
+          #no key was pressed.  Do house-keeping
           dirtied = 0
           for win in windows:
             dirtied += win.dirty
@@ -91,30 +104,39 @@ def run():
           stdscr.refresh()
           sleep(.1) #don't be burnin up the CPU, yo.
       elif key == KEY_TAB:
+          #cycle input window
           active_window.draw_border() #uses window default
           active_window = input_windows.next()
           active_window.draw_border(TITLE_ACTIVE)
           
       else:
-        #input_window.process_key(key)
+        #every other key gets processed by the active input window
         active_window.process_key(key)
+
+#Set up screen.  Try/except to make sure the terminal gets put back
+#  together no matter what happens
 try:
-  #stolen from https://docs.python.org/2/howto/curses.html
+  #https://docs.python.org/2/howto/curses.html
   stdscr = curses.initscr()
   curses.start_color()
-  curses.noecho()
-  curses.cbreak()
-  stdscr.nodelay(1)
-  stdscr.keypad(1)
-  curses.init_pair(1, COLOR_GREEN, COLOR_BLACK)
-  curses.init_pair(2, COLOR_RED, COLOR_BLACK)
-  curses.init_pair(3, COLOR_WHITE, COLOR_BLACK)
-  curses.init_pair(4, COLOR_MAGENTA, COLOR_BLACK)
+  curses.noecho()  #let input windows handle drawing characters to the screen
+  curses.cbreak()  #enable key press asynch
+  stdscr.nodelay(1)  #enable immediate time out (don't wait for keys at all)
+  stdscr.keypad(1)  #enable enter, tab, and other keys
+
+  #Set initial palette
+  curses.init_pair(TITLE_ACTIVE, COLOR_RED, COLOR_BLACK)
+  curses.init_pair(TITLE_INACTIVE, COLOR_WHITE, COLOR_BLACK)
+  curses.init_pair(MENU_MESSAGE, COLOR_MAGENTA, COLOR_BLACK)
+
+  #run while wrapped in this try/except
   run()
 
 except Exception:
+  #put the terminal back in it's normal mode before raising the error
   curses.nocbreak(); stdscr.keypad(0); curses.echo();curses.endwin()
   raise
+
 finally:
   curses.nocbreak(); stdscr.keypad(0); curses.echo();curses.endwin()
   print "\nThis terminal can%s display color\n" % ["'t",""][curses.has_colors()]
